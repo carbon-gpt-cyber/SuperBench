@@ -40,12 +40,10 @@ def train(args, train_loader, val1_loader, val2_loader, model, optimizer, criter
         # record train loss
         train_loss_mean = train_loss_total / len(train_loader)
         train_loss_list.append(train_loss_mean)
-        run["train/loss"].log(train_loss_mean)
         # validate
         mse1, mse2 = validate(args, val1_loader, val2_loader, model, criterion)
         print("epoch: %s, val1 error (interp): %.10f, val2 error (extrap): %.10f" % (epoch, mse1, mse2))      
         val_error_list.append(mse1+mse2)
-        run["val/loss"].log((mse1+mse2)/2)
         if (mse1+mse2) <= best_val:
             best_val = mse1+mse2
             save_checkpoint(model, optimizer,'results/model_' + str(args.model) + '_' + str(args.data_name) + '_' + str(args.upscale_factor) + '_' + str(args.lr) + '_' + str(args.method) +'_' + str(args.noise_ratio) + '_' + str(args.seed) +'_' +str(id) + '.pt')
@@ -73,7 +71,6 @@ def validate(args, val1_loader, val2_loader, model, criterion):
             rfne_mean += rfne.mean()
             c += data.shape[0]
             d +=1
-    run["val1_rfne"].log(rfne.mean().item())
     mse1 /= c
     c = 0
     d = 0
@@ -87,7 +84,6 @@ def validate(args, val1_loader, val2_loader, model, criterion):
             c += data.shape[0]
             d +=1
     mse2 /= c
-    run["val2_rfne"].log(rfne.mean().item())
     return mse1.item(), mse2.item()
 
 
@@ -123,10 +119,8 @@ def main():
     parser.add_argument('--loss_type', type=str, default='l1', help='L1 or L2 loss')
     parser.add_argument('--optimizer_type', type=str, default='Adam', help='type of optimizer')
     parser.add_argument('--scheduler_type', type=str, default='ExponentialLR', help='type of scheduler')
-
     args = parser.parse_args()
     print(args)
-    run["config"] = vars(args)
     # % --- %
     # Set random seed to reproduce the work
     # % --- %
