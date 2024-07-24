@@ -431,6 +431,9 @@ def main():
 
     # all_results.sorted()
     # Serialize the updated results list to the JSON file
+
+
+    print("Dumping results to eval_results.json")
     with open("eval_results.json", "w") as f:
         json.dump(all_results, f, indent=4)
 
