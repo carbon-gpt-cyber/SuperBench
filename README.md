@@ -171,20 +171,19 @@ wget https://portal.nersc.gov/project/dasrepo/superbench/superbench_v1.tar
 3. Evaluate the model performance:
 
 ```python 
-    # evaluate RFNE, IN, PSNR, SSIM and physics loss
     python eval.py
 ```
 
 4. Visualize the SR results
 ```python
-# for visualization in the paper
-python presentation/plot_snapshots.py
-
+    # for visualizing snapshots in the paper
+    python analysis/plot_snapshots.py
+    # for visualizing ACC results in the paper 
+    python analysis/plot_ACC.py
+    # for visualizing Energy Spectrum in the paper
+    python analysis/plot_Energy_Spectrum.py
 # 
 ```
-
-For detailed model configurations, please refer to the the folder ```config```.
-
 
 ### Contribution to datasets
 
