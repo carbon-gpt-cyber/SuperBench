@@ -1,5 +1,8 @@
 import argparse
+'''
+generate bash script for training all models. Please modify the DATA_INFO fit your own environment path.
 
+'''
 
 DATA_INFO = {"nskt_16k": ["/pscratch/sd/j/junyi012/superbench_v2/nskt_16k",3],
              "nskt_32k": ["/pscratch/sd/j/junyi012/superbench_v2/nskt_32k",3],
@@ -25,12 +28,12 @@ def generate_bash_script(data_name, model_name, scale_factor,num_pathches=8,crop
     else:
         file = "train.py"
 
-    bash_content = f"python {file} --data_path {DATA_INFO[data_name][0]} --data_name {data_name} --in_channels {DATA_INFO[data_name][1]} --upscale_factor {scale_factor} --model {model_name} --lr {MODEL_INFO[model_name]['lr']} --batch_size {MODEL_INFO[model_name]['batch_size']} --epochs {MODEL_INFO[model_name]['epochs']} --n_patches {num_pathches} --crop_size {crop_size};"
+    bash_content = f"python train.py --data_path {DATA_INFO[data_name][0]} --data_name {data_name} --in_channels {DATA_INFO[data_name][1]} --upscale_factor {scale_factor} --model {model_name} --lr {MODEL_INFO[model_name]['lr']} --batch_size {MODEL_INFO[model_name]['batch_size']} --epochs {MODEL_INFO[model_name]['epochs']} --n_patches {num_pathches} --crop_size {crop_size};"
     return bash_content
 
 def generate_bash_script_fluid(data_name, model_name, scale_factor, downsample_method="bicubic", noise=0.0,lamb_p=0.001):
     job_name = f"{data_name}_{model_name}_{scale_factor}_{lamb_p}"
-    bash_content = f"python train_fluid.py --data_path {DATA_INFO[data_name][0]} --data_name {data_name} --in_channels {DATA_INFO[data_name][1]} --upscale_factor {scale_factor} --model {model_name} --lr {MODEL_INFO[model_name]['lr']} --batch_size {MODEL_INFO[model_name]['batch_size']} --epochs {MODEL_INFO[model_name]['epochs']} --noise_ratio {noise} --method {downsample_method} --phy_loss_weight {lamb_p};"
+    bash_content = f"python train.py --data_path {DATA_INFO[data_name][0]} --data_name {data_name} --in_channels {DATA_INFO[data_name][1]} --upscale_factor {scale_factor} --model {model_name} --lr {MODEL_INFO[model_name]['lr']} --batch_size {MODEL_INFO[model_name]['batch_size']} --epochs {MODEL_INFO[model_name]['epochs']} --noise_ratio {noise} --method {downsample_method} --phy_loss_weight {lamb_p};"
     return bash_content
 
 # Run the function

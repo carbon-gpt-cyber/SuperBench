@@ -20,3 +20,4 @@ bash2slurm.sh
 plot_2.sh
 venv/
 superbench_v1.tar
+presentation_local

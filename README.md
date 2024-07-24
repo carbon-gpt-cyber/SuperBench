@@ -156,8 +156,8 @@ wget https://portal.nersc.gov/project/dasrepo/superbench/superbench_v1.tar
 
     2.1. Generate ```.sh``` code
     ```python
-    # train all baseline models used in SuperBench paper
-    python generate_sh.py 
+    # train all baseline models with same configuration in SuperBench paper
+    python generate_train_sh.py 
     ```
 
     2.2. Run the ```.sh``` code
@@ -173,8 +173,6 @@ wget https://portal.nersc.gov/project/dasrepo/superbench/superbench_v1.tar
 ```shell
 # evaluate RFNE, IN, PSNR, SSIM and physics loss
 sh eval.sh 
-# Regarding plots 
-sh eval_plot.sh
 ```
 
 4. Visualize the SR results
