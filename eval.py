@@ -283,7 +283,7 @@ def validate_all_metrics(args, test1_loader, test2_loader, model, mean, std):
     
 def main():  
     parser = argparse.ArgumentParser(description='training parameters')
-    parser.add_argument("save_prediction", type=str,default="True" ,help="save predictions as .npy file")
+    parser.add_argument("--save_prediction", type=str,default="True" ,help="save predictions as .npy file")
     # arguments for data
     parser.add_argument('--data_name', type=str, default='nskt_16k', help='dataset')
     parser.add_argument('--data_path', type=str, default='./datasets/nskt16000_1024', help='the folder path of dataset')

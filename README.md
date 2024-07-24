@@ -170,9 +170,9 @@ wget https://portal.nersc.gov/project/dasrepo/superbench/superbench_v1.tar
 
 3. Evaluate the model performance:
 
-```shell
-# evaluate RFNE, IN, PSNR, SSIM and physics loss
-sh eval.sh 
+```python 
+    # evaluate RFNE, IN, PSNR, SSIM and physics loss
+    python eval.py
 ```
 
 4. Visualize the SR results
