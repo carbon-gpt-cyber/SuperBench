@@ -12,6 +12,7 @@ from src.data_loader import getData
 from utils import *
 import random
 from utils import LossGenerator
+import os 
 
 # train the model with the given parameters and save the model with the best validation error
 def train(args, train_loader, val1_loader, val2_loader, model, optimizer, criterion):
@@ -55,7 +56,7 @@ def train(args, train_loader, val1_loader, val2_loader, model, optimizer, criter
         val_error_list.append(mse1+mse2)
         if (mse1+mse2) <= best_val:
             best_val = mse1+mse2
-            save_checkpoint(model, optimizer,'results/model_' + str(args.model) + '_' + str(args.data_name) + '_' + str(args.upscale_factor) + '_' + str(args.lr) + '_' + str(args.method) +'_' + str(args.noise_ratio) + '_' + str(args.seed) +'_' +str(id) + '.pt')
+            save_checkpoint(model, optimizer,'results/model_' + str(args.model) + '_' + str(args.data_name) + '_' + str(args.upscale_factor) + '_' + str(args.lr) + '_' + str(args.method) +'_' + str(args.noise_ratio) + '_' + str(args.seed) + '.pt')
         end = time.time()
         print('The epoch time is: ', (end - start))
     end2 = time.time()
@@ -136,8 +137,11 @@ def main():
     # % --- %
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
-    torch.save({"config":vars(args),
-                "saved_path": str('results/model_' + str(args.model) + '_' + str(args.data_name) + '_' + str(args.upscale_factor) + '_' + str(args.lr) + '_' + str(args.method) +'_' + str(args.noise_ratio) + '_' + str(args.seed) +'_' +str(id) + '.pt')},f"results/config_{str(id)}.pt")
+
+    os.makedirs('./figures', exist_ok=True)
+    os.makedirs('./results', exist_ok=True)
+    # torch.save({"config":vars(args),
+    #             "saved_path": str('results/model_' + str(args.model) + '_' + str(args.data_name) + '_' + str(args.upscale_factor) + '_' + str(args.lr) + '_' + str(args.method) +'_' + str(args.noise_ratio) + '_' + str(args.seed) +'_' +str(id) + '.pt')},f"results/config_{str(id)}.pt")
     # % --- %
     # Load data
     # % --- %
@@ -202,6 +206,8 @@ def main():
     # % --- %
     # Post-process: plot train loss and val error
     # % --- %
+
+
     x_axis = np.arange(0, args.epochs)
     plt.figure()
     plt.plot(x_axis, train_loss_list, label = 'train loss')

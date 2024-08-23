@@ -148,6 +148,8 @@ pip install -r requirements.txt
 ### Usage
 
 1. Download the [SuperBench](https://portal.nersc.gov/project/dasrepo/superbench) datasets:
+    
+    Example:
     ```shell
     # for Cosmology data
     wget https://portal.nersc.gov/project/dasrepo/superbench/cosmo.tar
@@ -159,37 +161,58 @@ pip install -r requirements.txt
     wget https://portal.nersc.gov/project/dasrepo/superbench/nskt_16k.tar
     ```
 
-2. Run the baseline models on the datasets: 
 
-    2.1. Generate ```.sh``` code
-    ```python
-    # train all baseline models with same configuration in SuperBench paper
-    python generate_train_sh.py 
-    ```
+2. Training Baseline Models
 
-    2.2. Run the ```.sh``` code
+    To train all baseline models with the same configuration as described in the SuperBench paper, follow these steps:
+
+    2.1. Generate the `.sh` code by running the following command; 
+
+
+
+    > **Note:** Make sure to update the `PATH` variable in `generate_train_sh.py` to match the path where you have downloaded the data.
+
+
+
 
     ```shell
-    # train all baseline models used in SuperBench paper
+    python generate_train_sh.py
+    ```
+
+    2.2. Execute the generated `.sh` code to train all baseline models:
+
+    ```shell
     sh train_all.sh
     ```
 
-3. Evaluate the model performance:
+3. Evaluating Trained Models
 
-```python 
-    python eval.py
-```
 
-4. Visualize the SR results
-```python
-    # for visualizing snapshots in the paper
+    To evaluate the performance of your trained model, you can use the `eval.py` script provided. This script requires several arguments to be specified:
+
+    - `--data_name`: The name of the dataset you are using for evaluation.
+    - `--data_path`: The path to the dataset directory.
+    - `--model_path`: The path to the trained model file.
+    - `--in_channels`: The number of input channels for the model.
+
+
+4. Visualize the Super-Resolution (SR) Results
+
+    To visualize snapshots as presented in the paper:
+    ```bash
     python analysis/plot_snapshots.py
-    # for visualizing ACC results in the paper 
-    python analysis/plot_ACC.py
-    # for visualizing Energy Spectrum in the paper
-    python analysis/plot_Energy_Spectrum.py
+    ```
 
-```
+
+    To visualize the accuracy results as shown in the paper:
+    ```bash
+    python analysis/plot_ACC.py
+    ```
+
+    To visualize the energy spectrum in the paper:
+    ```bash
+    python analysis/plot_Energy_Spectrum.py
+    ```
 
 ### Contribution to datasets
 

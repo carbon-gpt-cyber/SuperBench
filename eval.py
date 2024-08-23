@@ -9,7 +9,7 @@ import cmocean
 import math
 import torch.nn.functional as F
 
-from data_loader import getData
+from src.data_loader import getData
 from utils import *
 from src.models import *
 from utils import LossGenerator
@@ -364,10 +364,7 @@ def main():
 
     model = model_list[name]
     model = torch.nn.DataParallel(model)
-    if args.model_path is None:
-        model_path = 'results/model_' + str(args.model) + '_' + str(args.data_name) + '_' + str(args.upscale_factor) + '_' + str(args.lr) + '_' + str(args.method) +'_' + str(args.noise_ratio) + '_' + str(args.seed) + '.pt'
-    else:
-        model_path = args.model_path
+    model_path = args.model_path
     if args.model != 'Bicubic':
         model = load_checkpoint(model, model_path)
         model = model.to(args.device)
@@ -440,7 +437,8 @@ def main():
     
     if args.save_prediction.lower() == "true":
         print("saving predictions as .npy file")
-        load_everything(args, test1_loader, test2_loader, model)
+        os.makedirs("saved_predictions",exist_ok=True)
+        load_everything(args, test1_loader, test2_loader, model,DIR="saved_predictions/")
 
 
 if __name__ =='__main__':

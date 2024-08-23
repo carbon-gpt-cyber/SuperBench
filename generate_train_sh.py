@@ -9,8 +9,8 @@ PATH = "/pscratch/sd/j/junyi012/superbench_v2"
 
 DATA_INFO = {"nskt_16k": [PATH + "/nskt_16k",3],
              "nskt_32k": [PATH + "/nskt_32k",3],
-            "nskt_16k_sim_4_v7": [PATH + "/nskt_16k_sim_4",3],
-            "nskt_32k_sim_4_v7": [PATH + "/nskt_32k_sim_4",3],
+            "nskt_16k_sim_4": [PATH + "/nskt_16k_sim_4",3],
+            "nskt_32k_sim_4": [PATH + "/nskt_32k_sim_4",3],
             "cosmo": [PATH + "/cosmo",2],
             "cosmo_sim":[PATH + "/cosmo_sim_8",2],
             "era5": [PATH + "/climate",3],
@@ -58,18 +58,18 @@ if __name__ == "__main__":
                         print(f"{job_name}",file=f)
                     f.close()
 
-    data_name_list = ["nskt_16k_sim_4_v7","nskt_32k_sim_4_v7"]
+    data_name_list = ["nskt_16k_sim_4","nskt_32k_sim_4"]
     for name in data_name_list:
         for scale_factor in [4]:
             for model_name in model_name_list:
                 job_name = generate_bash_script(data_name=name,model_name=model_name,scale_factor=scale_factor,num_pathches=8)
                 with open("train_all.sh","a") as f:
-                    print(f"sbatch make_file/{job_name}.sh",file=f)
+                    print(f"{job_name}",file=f)
                 f.close()
                 if name.startswith("nskt") and model_name.startswith("SwinIR"):
                     job_name = generate_bash_script_fluid(data_name=name,model_name=model_name,scale_factor=scale_factor,downsample_method="lr_sim")
                     with open("train_all.sh","a") as f:
-                        print(f"sbatch make_file/{job_name}.sh",file=f)
+                        print(f"{job_name}",file=f)
                     f.close()
 
     data_name_list = ["cosmo_sim_8"]
@@ -78,5 +78,5 @@ if __name__ == "__main__":
             for model_name in model_name_list:
                 job_name = generate_bash_script(data_name=name,model_name=model_name,scale_factor=scale_factor,num_pathches=8)
                 with open("train_all.sh","a") as f:
-                    print(f"sbatch make_file/{job_name}.sh",file=f)
+                    print(f"{job_name}",file=f)
                 f.close()
