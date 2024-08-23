@@ -9,11 +9,11 @@ PATH = "/pscratch/sd/j/junyi012/superbench_v2"
 
 DATA_INFO = {"nskt_16k": [PATH + "/nskt_16k",3],
              "nskt_32k": [PATH + "/nskt_32k",3],
-            "nskt_16k_sim_4_v7": [PATH + "/nskt_16k_sim_4_v7",3],
-            "nskt_32k_sim_4_v7": [PATH + "/nskt_32k_sim_4_v7",3],
-            "cosmo": [PATH + "/cosmo2048",2],
-            "cosmo_sim_8":[PATH + "/cosmo_lre_sim_s8_v2",2],
-            "era5": [PATH + "/era5",3],
+            "nskt_16k_sim_4_v7": [PATH + "/nskt_16k_sim_4",3],
+            "nskt_32k_sim_4_v7": [PATH + "/nskt_32k_sim_4",3],
+            "cosmo": [PATH + "/cosmo",2],
+            "cosmo_sim_8":[PATH + "/cosmo_sim_8",2],
+            "era5": [PATH + "/climate",3],
               }
 
 MODEL_INFO = {"SRCNN": {"lr": 4e-3,"batch_size": 256,"epochs": 300},
