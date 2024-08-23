@@ -148,18 +148,18 @@ pip install -r requirements.txt
 ### Usage
 
 1. Download the [SuperBench](https://portal.nersc.gov/project/dasrepo/superbench) datasets:
-```shell
-# for Cosmology data
-wget https://portal.nersc.gov/project/dasrepo/superbench/cosmo.tar
+    ```shell
+    # for Cosmology data
+    wget https://portal.nersc.gov/project/dasrepo/superbench/cosmo.tar
 
-# for Climate data
-wget https://portal.nersc.gov/project/dasrepo/superbench/climate.tar
+    # for Climate data
+    wget https://portal.nersc.gov/project/dasrepo/superbench/climate.tar
 
-# for fluid data
-wget https://portal.nersc.gov/project/dasrepo/superbench/nskt_16k.tar
-```
+    # for Fluid data
+    wget https://portal.nersc.gov/project/dasrepo/superbench/nskt_16k.tar
+    ```
 
-2. Run the baseline models on the datasets:
+2. Run the baseline models on the datasets: 
 
     2.1. Generate ```.sh``` code
     ```python
@@ -172,7 +172,6 @@ wget https://portal.nersc.gov/project/dasrepo/superbench/nskt_16k.tar
     ```shell
     # train all baseline models used in SuperBench paper
     sh train_all.sh
-
     ```
 
 3. Evaluate the model performance:

@@ -12,7 +12,7 @@ DATA_INFO = {"nskt_16k": [PATH + "/nskt_16k",3],
             "nskt_16k_sim_4_v7": [PATH + "/nskt_16k_sim_4",3],
             "nskt_32k_sim_4_v7": [PATH + "/nskt_32k_sim_4",3],
             "cosmo": [PATH + "/cosmo",2],
-            "cosmo_sim_8":[PATH + "/cosmo_sim_8",2],
+            "cosmo_sim":[PATH + "/cosmo_sim_8",2],
             "era5": [PATH + "/climate",3],
               }
 
