@@ -13,4 +13,3 @@ from .EDSR import EDSR
 from .SwinIR import SwinIR
 from .Bicubic import Bicubic
 from .FNO2D import FNO2D
-from .FNO2D_conv import FNO2D_conv

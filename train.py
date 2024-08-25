@@ -8,12 +8,18 @@ from tqdm import tqdm
 import time
 import matplotlib.pyplot as plt
 from src.models import *
-from data_loader import getData
+from src.data_loader import getData
 from utils import *
 import random
+from utils import LossGenerator
+import os 
+
 
 # train the model with the given parameters and save the model with the best validation error
 def train(args, train_loader, val1_loader, val2_loader, model, optimizer, criterion):
+    if args.phy_loss_weight > 0:
+        loss_generator = LossGenerator(args, dx=2.0*np.pi/2048.0, kernel_size=3)
+    l2loss = nn.MSELoss()
     best_val = np.inf
     train_loss_list, val_error_list = [], []
     start2 = time.time()
@@ -29,6 +35,11 @@ def train(args, train_loader, val1_loader, val2_loader, model, optimizer, criter
             model.train()
             output = model(data) 
             loss = criterion(output, target)
+            if args.phy_loss_weight > 0 and args.data_name.startswith('nskt'):
+                div = loss_generator.get_div_loss(output)
+                phy_loss = l2loss(div, torch.zeros_like(div))
+                loss += phy_loss*args.phy_loss_weight
+
             train_loss_total += loss.item()
             
             # backward
@@ -40,15 +51,15 @@ def train(args, train_loader, val1_loader, val2_loader, model, optimizer, criter
         # record train loss
         train_loss_mean = train_loss_total / len(train_loader)
         train_loss_list.append(train_loss_mean)
-        run["train/loss"].log(train_loss_mean)
+
         # validate
         mse1, mse2 = validate(args, val1_loader, val2_loader, model, criterion)
         print("epoch: %s, val1 error (interp): %.10f, val2 error (extrap): %.10f" % (epoch, mse1, mse2))      
         val_error_list.append(mse1+mse2)
-        run["val/loss"].log((mse1+mse2)/2)
+
         if (mse1+mse2) <= best_val:
             best_val = mse1+mse2
-            save_checkpoint(model, optimizer,'results/model_' + str(args.model) + '_' + str(args.data_name) + '_' + str(args.upscale_factor) + '_' + str(args.lr) + '_' + str(args.method) +'_' + str(args.noise_ratio) + '_' + str(args.seed) +'_' +str(id) + '.pt')
+            save_checkpoint(model, optimizer,'results/model_' + str(args.model) + '_' + str(args.data_name) + '_' + str(args.upscale_factor) + '_' + str(args.lr) + '_' + str(args.method) +'_' + str(args.noise_ratio) + '_' + str(args.seed) + '.pt')
         end = time.time()
         print('The epoch time is: ', (end - start))
     end2 = time.time()
@@ -73,7 +84,7 @@ def validate(args, val1_loader, val2_loader, model, criterion):
             rfne_mean += rfne.mean()
             c += data.shape[0]
             d +=1
-    run["val1_rfne"].log(rfne.mean().item())
+
     mse1 /= c
     c = 0
     d = 0
@@ -87,7 +98,7 @@ def validate(args, val1_loader, val2_loader, model, criterion):
             c += data.shape[0]
             d +=1
     mse2 /= c
-    run["val2_rfne"].log(rfne.mean().item())
+
     return mse1.item(), mse2.item()
 
 
@@ -113,27 +124,31 @@ def main():
     parser.add_argument('--step_size', type=int, default=1000, help='step size for scheduler')
     parser.add_argument('--gamma', type=float, default=0.97, help='coefficient for scheduler')
     parser.add_argument('--noise_ratio', type=float, default=0.0, help='noise ratio')
-
+    parser.add_argument('--phy_loss_weight', type=float, default=0.0, help='physics loss weight')
     # arguments for model
     parser.add_argument('--upscale_factor', type=int, default=4, help='upscale factor')
     parser.add_argument('--in_channels', type=int, default=2, help='num of input channels')
-    parser.add_argument('--hidden_channels', type=int, default=32, help='num of hidden channels')
+    parser.add_argument('--hidden_channels', type=int, default=64, help='num of hidden channels')
     parser.add_argument('--out_channels', type=int, default=2, help='num of output channels')
     parser.add_argument('--n_res_blocks', type=int, default=18, help='num of resdiual blocks')
+    parser.add_argument('--modes', type=int, default=12, help='num of modes')
     parser.add_argument('--loss_type', type=str, default='l1', help='L1 or L2 loss')
     parser.add_argument('--optimizer_type', type=str, default='Adam', help='type of optimizer')
     parser.add_argument('--scheduler_type', type=str, default='ExponentialLR', help='type of scheduler')
-
     args = parser.parse_args()
     print(args)
-    run["config"] = vars(args)
+
     # % --- %
     # Set random seed to reproduce the work
     # % --- %
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
-    torch.save({"config":vars(args),
-                "saved_path": str('results/model_' + str(args.model) + '_' + str(args.data_name) + '_' + str(args.upscale_factor) + '_' + str(args.lr) + '_' + str(args.method) +'_' + str(args.noise_ratio) + '_' + str(args.seed) +'_' +str(id) + '.pt')},f"results/config_{str(id)}.pt")
+
+    os.makedirs('./figures', exist_ok=True)
+    os.makedirs('./results', exist_ok=True)
+    # torch.save({"config":vars(args),
+    #             "saved_path": str('results/model_' + str(args.model) + '_' + str(args.data_name) + '_' + str(args.upscale_factor) + '_' + str(args.lr) + '_' + str(args.method) +'_' + str(args.noise_ratio) + '_' + str(args.seed) +'_' +str(id) + '.pt')},f"results/config_{str(id)}.pt")
+
     # % --- %
     # Load data
     # % --- %
@@ -148,6 +163,8 @@ def main():
     # % --- %
     # some hyper-parameters for SwinIR
     upscale = args.upscale_factor
+    hidden = args.hidden_channels
+    modes = args.modes
     window_size = 8
     height = (args.crop_size // upscale // window_size + 1) * window_size
     width = (args.crop_size // upscale // window_size + 1) * window_size
@@ -160,7 +177,8 @@ def main():
             'SwinIR': SwinIR(upscale=args.upscale_factor, in_chans=args.in_channels, img_size=(height, width),
                     window_size=window_size, img_range=1., depths=[6, 6, 6, 6, 6, 6],
                     embed_dim=180, num_heads=[6, 6, 6, 6, 6, 6], mlp_ratio=2, upsampler='pixelshuffle', resi_connection='1conv',mean =mean,std=std),
-    }
+           "FNO2D":FNO2D(layers=[hidden, hidden, hidden, hidden, hidden],modes1=[modes, modes, modes, modes],modes2=[modes, modes, modes, modes],fc_dim=128,in_dim=args.in_channels,out_dim=args.in_channels,mean= mean,std=std,scale_factor=upscale),
+    }  
 
     model = model_list[args.model].to(args.device)
     model = torch.nn.DataParallel(model)
@@ -195,6 +213,8 @@ def main():
     # % --- %
     # Post-process: plot train loss and val error
     # % --- %
+
+
     x_axis = np.arange(0, args.epochs)
     plt.figure()
     plt.plot(x_axis, train_loss_list, label = 'train loss')

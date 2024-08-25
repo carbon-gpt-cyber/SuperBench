@@ -147,46 +147,68 @@ pip install -r requirements.txt
 
 ### Usage
 
-1. Download the [SuperBench](https://portal.nersc.gov/project/dasrepo/superbench/superbench_v1.tar) datasets:
-```shell
-wget https://portal.nersc.gov/project/dasrepo/superbench/superbench_v1.tar
-```
+1. Download the [SuperBench](https://portal.nersc.gov/project/dasrepo/superbench) datasets:
+    
+    Example:
+    ```shell
+    # for Cosmology data
+    wget https://portal.nersc.gov/project/dasrepo/superbench/cosmo.tar
 
-2. Run the baseline models on the datasets:
+    # for Climate data
+    wget https://portal.nersc.gov/project/dasrepo/superbench/climate.tar
 
-    2.1. Generate ```.sh``` code
-    ```python
-    # train all baseline models used in SuperBench paper
-    python generate_sh.py 
+    # for Fluid data
+    wget https://portal.nersc.gov/project/dasrepo/superbench/nskt_16k.tar
     ```
 
-    2.2. Run the ```.sh``` code
+
+2. Training Baseline Models
+
+    To train all baseline models with the same configuration as described in the SuperBench paper, follow these steps:
+
+    2.1. Generate the `.sh` code by running the following command; 
+
+
+
+    > **Note:** Make sure to update the `PATH` variable in `generate_train_sh.py` to match the path where you have downloaded the data.
+
 
     ```shell
-    # train all baseline models used in SuperBench paper
-    sh train_all.sh
-
+    python generate_train_sh.py
     ```
 
-3. Evaluate the model performance:
+    2.2. Execute the generated `.sh` code to train all baseline models:
 
-```shell
-# evaluate RFNE, IN, PSNR, SSIM and physics loss
-sh eval.sh 
-# Regarding plots 
-sh eval_plot.sh
-```
+    ```shell
+    sh train_all.sh
+    ```
 
-4. Visualize the SR results
-```python
-# for visualization in the paper
-python presentation/plot_snapshots.py
+3. Evaluating Trained Models
 
-# 
-```
+    To evaluate the performance of your trained model, you can use the `eval.py` script provided. This script requires several arguments to be specified:
 
-For detailed model configurations, please refer to the the folder ```config```.
+    - `--data_name`: The name of the dataset you are using for evaluation.
+    - `--data_path`: The path to the dataset directory.
+    - `--model_path`: The path to the trained model file.
+    - `--in_channels`: The number of input channels for the model.
 
+4. Visualize the Super-Resolution (SR) Results
+
+    To visualize snapshots as presented in the paper:
+    ```bash
+    python analysis/plot_snapshots.py
+    ```
+
+
+    To visualize the accuracy results as shown in the paper:
+    ```bash
+    python analysis/plot_ACC.py
+    ```
+
+    To visualize the energy spectrum in the paper:
+    ```bash
+    python analysis/plot_Energy_Spectrum.py
+    ```
 
 ### Contribution to datasets
 

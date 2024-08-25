@@ -9,10 +9,15 @@ results/*/*.pt
 make_file/*.sbatch
 make_file
 debug/*
+presentation/*
+figures_v2_snapshots
 *.gif
 output
 debug
-images
+figures
 make_file
 bash2slurm.sh
 plot_2.sh
+venv/
+superbench_v1.tar
+presentation_local

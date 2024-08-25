@@ -7,106 +7,153 @@ import argparse
 import matplotlib.pyplot as plt
 import cmocean  
 import math
-from data_loader import getData
+import torch.nn.functional as F
+
+from src.data_loader import getData
 from utils import *
 from src.models import *
-
+from utils import LossGenerator
+import os
 # % --- %
 # Evaluate models
 # % --- %
-class Conv2dDerivative(nn.Module):
-    def __init__(self, DerFilter, resol, kernel_size=3, name=''):
-        super(Conv2dDerivative, self).__init__()
 
-        self.resol = resol  # constant in the finite difference
-        self.name = name
-        self.input_channels = 1
-        self.output_channels = 1
-        self.kernel_size = kernel_size
+def load_everything(args, test1_loader, test2_loader, model, DIR="/pscratch/sd/j/junyi012/superbench_v2/eval_buffer/"):
+    '''
+    Load any model and save the LR,HR,Predictions as seperate .npy files to DIR
 
-        self.padding = int((kernel_size - 1) // 2)
-        self.filter = nn.Conv2d(self.input_channels, self.output_channels, self.kernel_size, 
-            1, padding=0, bias=False)
+    Args:
+        args (object): The arguments object containing various parameters.
+        test1_loader (object): The data loader for test1.
+        test2_loader (object): The data loader for test2.
+        model (object): The model to be used for prediction.
+        DIR (str, optional): The directory path to save the files.
 
-        # Fixed gradient operator
-        self.filter.weight = nn.Parameter(torch.FloatTensor(DerFilter), requires_grad=False)  
+    Returns:
+        bool: True if the operation is successful, False otherwise.
+    '''
+    if args.model != 'FNO2D_patch':
+        with torch.no_grad():
+            lr_list, hr_list, pred_list = [], [], []
+            for batch_idx, (data, target) in enumerate(test2_loader):
+                data, target = data.to(args.device).float(), target.to(args.device).float()
+                output = model(data)
+                lr, hr, pred = data.cpu().numpy(), target.cpu().numpy(), output.cpu().numpy()
+                lr_list.append(lr)
+                hr_list.append(hr)
+                pred_list.append(pred)
+            pred_list = np.concatenate(pred_list)
+            lr_list = np.concatenate(lr_list)
+            hr_list = np.concatenate(hr_list)
+            np.save(DIR + f"{args.data_name}_{args.upscale_factor}_lr_{args.method}_{args.noise_ratio}.npy", lr_list)
+            np.save(DIR + f"{args.data_name}_{args.upscale_factor}_hr_{args.method}_{args.noise_ratio}.npy", hr_list)
+            np.save(DIR + f"{args.data_name}_{args.upscale_factor}_{args.model}_pred_{args.method}_{args.noise_ratio}.npy", pred_list)
+    else:
+        with torch.no_grad():
+            lr_list, hr_list, pred_list = [], [], []
+            for batch_idx, (data, target) in enumerate(test2_loader):
+                data, target = data.to(args.device).float(), target.to(args.device).float()
+                hr_patch_size = 128
+                hr_stride = 128
+                lr_patch_size = 128 // args.upscale_factor
+                lr_stride = 128 // args.upscale_factor
+                lr_patches = data.unfold(2, lr_patch_size, lr_stride).unfold(3, lr_patch_size, lr_stride)
+                hr_patches = target.unfold(2, hr_patch_size, hr_stride).unfold(3, hr_patch_size, hr_stride)
+                if lr_patches.shape[2] != hr_patches.shape[2] or lr_patches.shape[3] != hr_patches.shape[3]:
+                    print("patch size not match")
+                    return False
+                output = torch.zeros_like(hr_patches)
+                for i in range(hr_patches.shape[2]):
+                    for j in range(hr_patches.shape[3]):
+                        lr = lr_patches[:, :, i, j]
+                        with torch.no_grad():
+                            output_p = model(lr)
+                            output[:, :, i, j] = output_p
+                patches_flat = output.permute(0, 1, 4, 5, 2, 3).contiguous().view(1, target.shape[1] * hr_patch_size ** 2, -1)
+                output = F.fold(patches_flat, output_size=(target.shape[-2], target.shape[-1]), kernel_size=(hr_patch_size, hr_patch_size), stride=(hr_stride, hr_stride))
+                lr_data, hr_data, pred = data.cpu().numpy(), target.cpu().numpy(), output.cpu().numpy()
+                lr_list.append(lr_data)
+                hr_list.append(hr_data)
+                pred_list.append(pred)
+            pred_list = np.concatenate(pred_list)
+            lr_list = np.concatenate(lr_list)
+            hr_list = np.concatenate(hr_list)
+            # if os.path.exists(DIR+f"eval_buffer/{args.data_name}_{args.upscale_factor}_lr.npy") == False:
+            np.save(DIR + f"{args.data_name}_{args.upscale_factor}_lr_{args.method}_{args.noise_ratio}.npy", lr_list)
+            np.save(DIR + f"{args.data_name}_{args.upscale_factor}_hr_{args.method}_{args.noise_ratio}.npy", hr_list)
+            np.save(DIR + f"{args.data_name}_{args.upscale_factor}_{args.model}_pred_{args.method}_{args.noise_ratio}.npy", pred_list)
+    return True
 
-    def forward(self, input):
-        derivative = self.filter(input)
-        return derivative / self.resol    
+def get_single_pred(args, lr, hr, model, save_name, location=(3,0)):
+    """
+    Generate a single prediction using the specified model.
 
-class LossGenerator(nn.Module):
-    def __init__(self, args, dx=2.0*math.pi/2048.0, kernel_size=3):
-        super(LossGenerator,self).__init__()
+    Args:
+        args (argparse.Namespace): The command-line arguments.
+        lr (numpy.ndarray): The low-resolution input data.
+        hr (numpy.ndarray): The high-resolution target data.
+        model (torch.nn.Module): The model used for prediction.
+        save_name (str): The name of the file to save the prediction.
+        location (tuple, optional): The location of the batch and channel to use. Defaults to (3, 0).
 
-        self.delta_x = torch.tensor(dx)
+    Returns:
+        bool: True if the prediction is successfully generated and saved as "save_name" False otherwise.
+    """
 
-        #https://en.wikipedia.org/wiki/Finite_difference_coefficient
-        self.filter_y4 = [[[[    0,   0,   0,   0,     0],
-           [    0,   0,   0,   0,     0],
-           [1/12, -8/12,  0,  8/12, -1/12],
-           [    0,   0,   0,   0,     0],
-           [    0,   0,   0,   0,     0]]]]
+    if args.model != 'FNO2D_patch':
+        batch, channel = location 
+        data, target = lr[batch:batch+1], hr[batch:batch+1]
+        data, target = torch.from_numpy(data).to(args.device).float(), torch.from_numpy(target).to(args.device).float()
+        with torch.no_grad():
+            output = model(data)
+            output = output.cpu().numpy()
+            if os.path.exists(save_name) == True:
+                np.save(save_name,output)
+            else:
+                print("pred has been saved")
+    else:
+        batch, channel = location 
+        data, target = lr[batch:batch+1], hr[batch:batch+1]
+        with torch.no_grad():
+            data, target = torch.from_numpy(data).to(args.device).float(), torch.from_numpy(target).to(args.device).float()
+            hr_patch_size = 128
+            hr_stride = 128
+            lr_patch_size = 128//args.upscale_factor
+            lr_stride = 128//args.upscale_factor
+            lr_patches = data.unfold(2, lr_patch_size, lr_stride).unfold(3, lr_patch_size, lr_stride)
+            hr_patches = target.unfold(2, hr_patch_size, hr_stride).unfold(3, hr_patch_size, hr_stride)
+            if lr_patches.shape[2] != hr_patches.shape[2] or lr_patches.shape[3] != hr_patches.shape[3]:
+                print("patch size not match")
+                return False
+            output = torch.zeros_like(hr_patches)
+            for i in range(hr_patches.shape[2]):
+                for j in range(hr_patches.shape[3]):
+                    lr = lr_patches[:,:,i,j]
+                    with torch.no_grad():
+                        output_p = model(lr)
+                        output[:,:,i,j] = output_p
+            patches_flat = output.permute(0, 1, 4, 5, 2, 3).contiguous().view(1, hr.shape[1]*hr_patch_size**2, -1)
+            # Fold the patches back
+            output = F.fold(patches_flat, output_size=(hr.shape[-2], hr.shape[-1]), kernel_size=(hr_patch_size, hr_patch_size), stride=(hr_stride, hr_stride))
+        output = output.cpu().numpy()
+        # if os.path.exists(save_name) == False:
+        np.save(save_name,output)
 
-        self.filter_x4 = [[[[    0,   0,   1/12,   0,     0],
-           [    0,   0,   -8/12,   0,     0],
-           [    0,   0,   0,   0,     0],
-           [    0,   0,   8/12,   0,     0],
-           [    0,   0,   -1/12,   0,     0]]]]
-
-        self.filter_x2 = [[[[    0,   -1/2,   0],
-                    [    0,   0,   0],
-                    [     0,   1/2,   0]]]]
-
-        self.filter_y2 = [[[[    0,   0,   0],
-                    [    -1/2,   0,   1/2],
-                    [     0,   0,   0]]]]
-
-        if kernel_size ==5:
-            self.dx = Conv2dDerivative(
-                DerFilter = self.filter_x4,
-                resol = self.delta_x,
-                kernel_size = 5,
-                name = 'dx_operator').to(args.device)
-
-            self.dy = Conv2dDerivative(
-                DerFilter = self.filter_y4,
-                resol = self.delta_x,
-                kernel_size = 5,
-                name = 'dy_operator').to(args.device)  
-
-        elif kernel_size ==3:
-            self.dx = Conv2dDerivative(
-                DerFilter = self.filter_x2,
-                resol = self.delta_x,
-                kernel_size = 3,
-                name = 'dx_operator').to(args.device)
-
-            self.dy = Conv2dDerivative(
-                DerFilter = self.filter_y2,
-                resol = self.delta_x,
-                kernel_size = 3,
-                name = 'dy_operator').to(args.device)  
-
-    def get_div_loss(self, output):
-        '''compute divergence loss'''
-        u = output[:,0:1,:,:]
-        #bu,xu,yu = u.shape
-        #u = u.reshape(bu,1,xu,yu)
-
-        v = output[:,1:2,:,:]
-        #bv,xv,yv = v.shape
-        #v = v.reshape(bv,1,xv,yv)
-
-        #w = output[:,0,:,:]
-        u_x = self.dx(u)  
-        v_y = self.dy(v)  
-        # div
-        div = u_x + v_y
-
-        return div
+    return True
 
 def validate_phyLoss(args, test1_loader, test2_loader, model):
+    """
+    Validates the physics loss (divergence loss) for the given model on two test loaders.
+
+    Args:
+        args (argparse.Namespace): The command-line arguments.
+        test1_loader (torch.utils.data.DataLoader): The data loader for the first test set.
+        test2_loader (torch.utils.data.DataLoader): The data loader for the second test set.
+        model (torch.nn.Module): The model to be evaluated.
+
+    Returns:
+        Tuple[float, float]: The average physics loss for the first and second test sets, respectively.
+    """
     
     avg_phyloss1, avg_phyloss2 = 0.0, 0.0
 
@@ -146,6 +193,27 @@ def normalize(args,target,mean,std):
     return target
 
 def validate_all_metrics(args, test1_loader, test2_loader, model, mean, std):
+    """
+    Calculates various evaluation metrics for a given model on test datasets.
+
+    Args:
+        args (argparse.Namespace): Command-line arguments.
+        test1_loader (torch.utils.data.DataLoader): DataLoader for the first test dataset.
+        test2_loader (torch.utils.data.DataLoader): DataLoader for the second test dataset.
+        model (torch.nn.Module): Trained model to evaluate.
+        mean (torch.Tensor): Mean values used for normalization.
+        std (torch.Tensor): Standard deviation values used for normalization.
+
+    Returns:
+        Tuple of metric averages for the first and second test datasets:
+        - Tuple of average RINE (Relative Infinite Norm Error) values for the first and second test datasets.
+        - Tuple of average RFNE (Relative Frobenius Norm Error) values for the first and second test datasets.
+        - Tuple of average PSNR (Peak Signal-to-Noise Ratio) values for the first and second test datasets.
+        - Tuple of average SSIM (Structural Similarity Index) values for the first and second test datasets.
+        - Tuple of average MSE (Mean Squared Error) values for the first and second test datasets.
+        - Tuple of average MAE (Mean Absolute Error) values for the first and second test datasets.
+    """
+
     from torchmetrics import StructuralSimilarityIndexMeasure
 
     ssim = StructuralSimilarityIndexMeasure().to(args.device)
@@ -203,179 +271,21 @@ def validate_all_metrics(args, test1_loader, test2_loader, model, mean, std):
                         err_ssim = ssim(target[i:(i+1), j:(j+1), ...], output[i:(i+1), j:(j+1), ...])
                         ssim_list.append(err_ssim.cpu())
             test += 1
-    # Averaging and converting to scalar values
-    # rfne1_np = torch.stack(rfne1).numpy().reshape(100,1,3)
-    # print("rfne1_np shape",rfne1_np.shape)
-    # rfne2_np = torch.stack(rfne2).numpy().reshape(100,1,3)
-    # psnr1_np = torch.stack(psnr1).numpy()
-    # print("psnr1_np.shape",psnr1_np.shape)
-    # psnr2_np = torch.stack(psnr2).numpy()
-    # fig, ax = plt.subplots(2, 2, figsize=(14, 10))
-    # ax[0,0].scatter(np.arange(0,len(rfne1_np),1),rfne1_np[:,0,2],label = "RFNE1 vorticity")
-    # ax[0,0].scatter(np.arange(0,len(rfne1_np),1),rfne1_np[:,0,0],label = "RFNE1 u")
-    # ax[0,0].scatter(np.arange(0,len(rfne1_np),1),rfne1_np[:,0,1],label = "RFNE1 v")
-    # ax[0,0].legend()
-    # ax[1,0].scatter(np.arange(0,len(rfne1_np),1),rfne2_np[:,0,2],label = "RFNE2 vorticity")
-    # ax[1,0].scatter(np.arange(0,len(rfne1_np),1),rfne2_np[:,0,0],label = "RFNE2 u")
-    # ax[1,0].scatter(np.arange(0,len(rfne1_np),1),rfne2_np[:,0,1],label = "RFNE2 v")
-    # ax[1,0].legend()    d
-    # ax[0,1].scatter(np.arange(0,len(psnr1),1),psnr1_np)
-    # ax[1,1].scatter(np.arange(0,len(psnr1),1),psnr2_np)
-    # fig.savefig(f"figures/check_snapshot_rfne_psnr.png")
+
     avg_rine1, avg_rine2 = torch.mean(torch.stack(rine1)).item(), torch.mean(torch.stack(rine2)).item()
     avg_rfne1, avg_rfne2 = torch.mean(torch.stack(rfne1)).item(), torch.mean(torch.stack(rfne2)).item()
     avg_psnr1, avg_psnr2 = torch.mean(torch.stack(psnr1)).item(), torch.mean(torch.stack(psnr2)).item()
     avg_ssim1, avg_ssim2 = torch.mean(torch.stack(ssim1)).item(), torch.mean(torch.stack(ssim2)).item()
     avg_mse1,avg_mse2 = torch.mean(torch.stack(mse1)).item(), torch.mean(torch.stack(mse2)).item()
     avg_mae1,avg_mae2 = torch.mean(torch.stack(mae1)).item(), torch.mean(torch.stack(mae2)).item()
-    fig, ax = plt.subplots(3, 3, figsize=(10, 10))
-    # for i in range(3):
-    #     ax[i, 0].imshow(target2[0, i, ...].cpu().numpy(), cmap=cmocean.cm.balance)
-    #     ax[i, 0].set_title('Ground truth')
-    #     ax[i, 1].imshow(output2[0, i, ...].cpu().numpy(), cmap=cmocean.cm.balance)
-    #     ax[i, 1].set_title('Prediction')
-    #     ax[i, 2].imshow(data2[0, i, ...].cpu().numpy(), cmap=cmocean.cm.balance)
-    #     ax[i, 2].set_title('Input')
-    # fig.savefig(f"figures/check_snapshot_prediciton.png")
 
     return (avg_rine1, avg_rine2), (avg_rfne1, avg_rfne2), (avg_psnr1, avg_psnr2), (avg_ssim1, avg_ssim2),(avg_mse1,avg_mse2),(avg_mae1,avg_mae2)
 
-'''comment below for old data'''
-# def validate_RINE(args, test1_loader, test2_loader, model,mean,std):
-#     '''Relative infinity norm error (RINE)'''
-#     # calculate the RINE of each snapshot and then average
-#     with torch.no_grad():
-#         for batch_idx, (data, target) in enumerate((test1_loader)):
-#             data, target = data.to(args.device).float(), target.to(args.device).float() # [b,c,h,w]
-#             output = model(data) 
-#             output = normalize(args,output,mean,std)
-#             target = normalize(args,target,mean,std)
-#             # calculate infinity norm of each snapshot
-#             err_ine = torch.norm((target-output), p=np.inf,dim = (-1,-2))/torch.norm(target,p=np.inf,dim = (-1,-2))
-
-#     ine1 = err_ine.mean().item()
-#     with torch.no_grad():
-#         for batch_idx, (data, target) in enumerate((test2_loader)):
-#             data, target = data.to(args.device).float(), target.to(args.device).float()
-#             output = model(data)  
-#             # calculate infinity norm of each snapshot
-#             output = normalize(args,output,mean,std)
-#             target = normalize(args,target,mean,std)
-#             err_ine = torch.norm(target-output, p=np.inf,dim = (-1,-2))/torch.norm(target,p=np.inf,dim = (-1,-2))
-#     ine2 = err_ine.mean().item()
-#     return ine1, ine2 
-
-
-# def validate_RFNE(args, test1_loader, test2_loader, model,mean,std):
-#     '''Relative Frobenius norm error (RFNE)'''
-#     with torch.no_grad():
-#         for batch_idx, (data, target) in enumerate((test1_loader)):
-#             data, target = data.to(args.device).float(), target.to(args.device).float()
-#             output = model(data)   
-#             output = normalize(args,output,mean,std)
-#             target = normalize(args,target,mean,std)
-#             # calculate frobenius norm of each snapshot of each channel
-#             err_rfne = torch.norm((target-output),p =2,dim=(-1,-2)) / torch.norm(target,p =2,dim=(-1,-2))
-#     rfne1 =err_rfne.mean().item()
-
-#     with torch.no_grad():
-#         for batch_idx, (data, target) in enumerate((test2_loader)):
-#             data, target = data.to(args.device).float(), target.to(args.device).float()
-#             output = model(data) 
-#             output = normalize(args,output,mean,std)
-#             target = normalize(args,target,mean,std)
-#             # calculate frobenius norm of each snapshot
-#             err_rfne = torch.norm((target-output),p =2,dim=(-1,-2)) / torch.norm(target,p =2,dim=(-1,-2))
-
-#     #fne2 = np.array(fne2).mean()
-#     rfne2 = err_rfne.mean().item()
-
-#     return rfne1, rfne2
-
-
-
-# def psnr(true, pred):
-#     mse = torch.mean((true - pred) ** 2)
-#     if mse == 0:
-#         return float('inf')
-#     max_value = torch.max(true)
-#     return 20 * torch.log10(max_value / torch.sqrt(mse))
-
-
-# def validate_PSNR(args, test1_loader, test2_loader, model,mean,std):
-#     '''Peak signal-to-noise ratio (PSNR)'''
-    
-#     error1 = []   
-#     with torch.no_grad():
-#         for batch_idx, (data, target) in enumerate((test1_loader)):
-#             data, target = data.to(args.device).float(), target.to(args.device).float()
-#             output = model(data) 
-#             output = normalize(args,output,mean,std)
-#             target = normalize(args,target,mean,std)
-#             # calculate PSNR of each snapshot and then average (Change to channel-wise)
-#             for i in range(target.shape[0]):
-#                 for j in range(target.shape[1]):
-#                     err_psnr = psnr(target[i,j,...], output[i,j,...])
-#                     error1.append(err_psnr)
-#     error1 = torch.mean(torch.stack(error1)).item()
-
-#     error2 = []  
-#     with torch.no_grad():
-#         for batch_idx, (data, target) in enumerate((test2_loader)):
-#             data, target = data.to(args.device).float(), target.to(args.device).float()
-#             output = model(data) 
-#             output = normalize(args,output,mean,std)
-#             target = normalize(args,target,mean,std)
-#             # calculate PSNR of each snapshot and then average
-#             for i in range(target.shape[0]):
-#                 for j in range(target.shape[1]):
-#                     err_psnr = psnr(target[i,j,...], output[i,j,...])
-#                     error2.append(err_psnr)
-#     error2 = torch.mean(torch.stack(error2)).item()
-
-#     return error1, error2
-
-
-# def validate_SSIM(args, test1_loader, test2_loader, model,mean,std):
-#         '''Structual Similarity Index Measure (SSIM)'''
-#         from torchmetrics import StructuralSimilarityIndexMeasure
-#         ssim = StructuralSimilarityIndexMeasure().to(args.device)
-        
-#         error1 = []
-#         with torch.no_grad():
-#             for batch_idx, (data, target) in enumerate((test1_loader)):
-#                 data, target = data.to(args.device).float(), target.to(args.device).float()
-#                 output = model(data) 
-                
-#                 output = normalize(args,output,mean,std)
-#                 target = normalize(args,target,mean,std)
-#                 for i in range(target.shape[0]):
-#                     for j in range(target.shape[1]):
-#                         err_ssim = ssim(target[i:(i+1),j:(j+1),...], output[i:(i+1),j:(j+1),...])
-#                         error1.append(err_ssim.cpu())
-
-#         # averaged SSIM
-#         err1 = torch.mean(torch.stack(error1)).item()
-
-#         error2 = []
-#         with torch.no_grad():
-#             for batch_idx, (data, target) in enumerate((test2_loader)):
-#                 data, target = data.to(args.device).float(), target.to(args.device).float()
-#                 output = model(data) 
-#                 output = normalize(args,output,mean,std)
-#                 target = normalize(args,target,mean,std)                
-#                 for i in range(target.shape[0]):
-#                     for j in range(target.shape[1]):
-#                         err_ssim = ssim(target[i:(i+1),j:(j+1),...], output[i:(i+1),j:(j+1),...])
-#                         error2.append(err_ssim.cpu())
-
-#         err2 = torch.mean(torch.stack(error2)).item()
-
-#         return err1, err2
 
     
 def main():  
     parser = argparse.ArgumentParser(description='training parameters')
+    parser.add_argument("--save_prediction", type=str,default="True" ,help="save predictions as .npy file")
     # arguments for data
     parser.add_argument('--data_name', type=str, default='nskt_16k', help='dataset')
     parser.add_argument('--data_path', type=str, default='./datasets/nskt16000_1024', help='the folder path of dataset')
@@ -384,7 +294,7 @@ def main():
     parser.add_argument('--n_patches', type=int, default=8, help='number of patches')
 
     # arguments for evaluation
-    parser.add_argument('--model', type=str, default='shallowDecoder', help='model')
+    parser.add_argument('--model', type=str, default='SRCNN', help='model')
     parser.add_argument('--model_path', type=str, default=None, help='saved model')
     parser.add_argument('--device', type=str, default=torch.device('cuda' if torch.cuda.is_available() else 'cpu'), help='computing device')
     parser.add_argument('--batch_size', type=int, default=32, help='batch size')
@@ -397,17 +307,17 @@ def main():
     parser.add_argument('--wd', type=float, default=1e-6, help='weight decay')
     parser.add_argument('--step_size', type=int, default=100, help='step size for scheduler')
     parser.add_argument('--gamma', type=float, default=0.97, help='coefficient for scheduler')
-
+    parser.add_argument('--phy_loss_weight', type=float, default=0.0, help='physics loss weight')
     # arguments for model
     parser.add_argument('--loss_type', type=str, default='l1', help='L1 or L2 loss')
     parser.add_argument('--optimizer_type', type=str, default='Adam', help='type of optimizer')
     parser.add_argument('--scheduler_type', type=str, default='ExponentialLR', help='type of scheduler')
     parser.add_argument('--upscale_factor', type=int, default=4, help='upscale factor')
     parser.add_argument('--in_channels', type=int, default=1, help='num of input channels')
-    parser.add_argument('--hidden_channels', type=int, default=32, help='num of hidden channels')
+    parser.add_argument('--hidden_channels', type=int, default=64, help='num of hidden channels')
     parser.add_argument('--out_channels', type=int, default=1, help='num of output channels')
     parser.add_argument('--n_res_blocks', type=int, default=18, help='num of resdiual blocks')
-
+    parser.add_argument('--modes', type=int, default=12, help='num of modes')
     args = parser.parse_args()
     print(args)
 
@@ -423,6 +333,8 @@ def main():
     # % --- %
     resol, n_fields, n_train_samples, mean, std = get_data_info(args.data_name)
     test1_loader, test2_loader = getData(args, args.n_patches, std=std,test=True)
+    hidden = args.hidden_channels
+    modes = args.modes
 
     # % --- %
     # Get model
@@ -443,19 +355,20 @@ def main():
                     window_size=window_size, img_range=1., depths=[6, 6, 6, 6, 6, 6],
                     embed_dim=180, num_heads=[6, 6, 6, 6, 6, 6], mlp_ratio=2, upsampler='pixelshuffle', resi_connection='1conv',mean =mean,std=std),
             'Bicubic': Bicubic(args.upscale_factor),
+            "FNO2D":FNO2D(layers=[hidden, hidden, hidden, hidden, hidden],modes1=[modes, modes, modes, modes],modes2=[modes, modes, modes, modes],fc_dim=128,in_dim=args.in_channels,out_dim=args.in_channels,mean= mean,std=std,scale_factor=upscale),
     }
     # Regarding train with physics loss
     if args.model.startswith('SwinIR'):
         name = "SwinIR"
+    elif args.model.startswith('FNO2D'):
+        name = "FNO2D"
     else:
         name = args.model
 
     model = model_list[name]
     model = torch.nn.DataParallel(model)
-    if args.model_path is None:
-        model_path = 'results/model_' + str(args.model) + '_' + str(args.data_name) + '_' + str(args.upscale_factor) + '_' + str(args.lr) + '_' + str(args.method) +'_' + str(args.noise_ratio) + '_' + str(args.seed) + '.pt'
-    else:
-        model_path = args.model_path
+    model_path = args.model_path
+
     if args.model != 'Bicubic':
         model = load_checkpoint(model, model_path)
         model = model.to(args.device)
@@ -472,7 +385,7 @@ def main():
     
     # Check if the results file already exists and load it, otherwise initialize an empty list
     try:
-        with open("normed_eval.json", "r") as f:
+        with open("eval_results.json", "r") as f:
             all_results = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         all_results = {}
@@ -519,8 +432,17 @@ def main():
 
     # all_results.sorted()
     # Serialize the updated results list to the JSON file
-    with open("normed_eval.json", "w") as f:
+
+    print("Dumping results to eval_results.json")
+    with open("eval_results.json", "w") as f:
         json.dump(all_results, f, indent=4)
+
+    
+    if args.save_prediction.lower() == "true":
+        print("saving predictions as .npy file")
+        os.makedirs("saved_predictions",exist_ok=True)
+        load_everything(args, test1_loader, test2_loader, model,DIR="saved_predictions/")
+
 
 
 if __name__ =='__main__':
