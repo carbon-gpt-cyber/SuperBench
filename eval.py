@@ -213,6 +213,7 @@ def validate_all_metrics(args, test1_loader, test2_loader, model, mean, std):
         - Tuple of average MSE (Mean Squared Error) values for the first and second test datasets.
         - Tuple of average MAE (Mean Absolute Error) values for the first and second test datasets.
     """
+
     from torchmetrics import StructuralSimilarityIndexMeasure
 
     ssim = StructuralSimilarityIndexMeasure().to(args.device)
@@ -280,6 +281,7 @@ def validate_all_metrics(args, test1_loader, test2_loader, model, mean, std):
 
     return (avg_rine1, avg_rine2), (avg_rfne1, avg_rfne2), (avg_psnr1, avg_psnr2), (avg_ssim1, avg_ssim2),(avg_mse1,avg_mse2),(avg_mae1,avg_mae2)
 
+
     
 def main():  
     parser = argparse.ArgumentParser(description='training parameters')
@@ -333,6 +335,7 @@ def main():
     test1_loader, test2_loader = getData(args, args.n_patches, std=std,test=True)
     hidden = args.hidden_channels
     modes = args.modes
+
     # % --- %
     # Get model
     # % --- %
@@ -365,6 +368,7 @@ def main():
     model = model_list[name]
     model = torch.nn.DataParallel(model)
     model_path = args.model_path
+
     if args.model != 'Bicubic':
         model = load_checkpoint(model, model_path)
         model = model.to(args.device)
@@ -429,7 +433,6 @@ def main():
     # all_results.sorted()
     # Serialize the updated results list to the JSON file
 
-
     print("Dumping results to eval_results.json")
     with open("eval_results.json", "w") as f:
         json.dump(all_results, f, indent=4)
@@ -439,6 +442,7 @@ def main():
         print("saving predictions as .npy file")
         os.makedirs("saved_predictions",exist_ok=True)
         load_everything(args, test1_loader, test2_loader, model,DIR="saved_predictions/")
+
 
 
 if __name__ =='__main__':

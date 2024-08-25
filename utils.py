@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from torch import nn
 import math
+
 def get_data_info(data_name):
     if data_name.startswith('nskt_32k'):
         resol = [2048, 2048] 

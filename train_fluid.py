@@ -8,38 +8,131 @@ from tqdm import tqdm
 import time
 import matplotlib.pyplot as plt
 from src.models import *
-from src.data_loader import getData
+from data_loader import getData
 from utils import *
+import neptune
+import math
 import random
-from utils import LossGenerator
-import os 
+id = random.randint(0,10000)
+run = neptune.init_run(
+    project="junyiICSI/superbenchRebuttal",
+    api_token="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiI2NGIxYjI4YS0yNDljLTQwOWMtOWY4YS0wOGNhM2Q5Y2RlYzQifQ==",
+    tags = [str(id)],
+)
+class Conv2dDerivative(nn.Module):
+    def __init__(self, DerFilter, resol, kernel_size=3, name=''):
+        super(Conv2dDerivative, self).__init__()
 
+        self.resol = resol  # constant in the finite difference
+        self.name = name
+        self.input_channels = 1
+        self.output_channels = 1
+        self.kernel_size = kernel_size
+
+        self.padding = int((kernel_size - 1) // 2)
+        self.filter = nn.Conv2d(self.input_channels, self.output_channels, self.kernel_size, 
+            1, padding=0, bias=False)
+
+        # Fixed gradient operator
+        self.filter.weight = nn.Parameter(torch.FloatTensor(DerFilter), requires_grad=False)  
+
+    def forward(self, input):
+        derivative = self.filter(input)
+        return derivative / self.resol    
+
+class LossGenerator(nn.Module):
+    def __init__(self, args, dx=2.0*math.pi/2048.0, kernel_size=3):
+        super(LossGenerator,self).__init__()
+
+        self.delta_x = torch.tensor(dx)
+
+        #https://en.wikipedia.org/wiki/Finite_difference_coefficient
+        self.filter_y4 = [[[[    0,   0,   0,   0,     0],
+           [    0,   0,   0,   0,     0],
+           [1/12, -8/12,  0,  8/12, -1/12],
+           [    0,   0,   0,   0,     0],
+           [    0,   0,   0,   0,     0]]]]
+
+        self.filter_x4 = [[[[    0,   0,   1/12,   0,     0],
+           [    0,   0,   -8/12,   0,     0],
+           [    0,   0,   0,   0,     0],
+           [    0,   0,   8/12,   0,     0],
+           [    0,   0,   -1/12,   0,     0]]]]
+
+        self.filter_x2 = [[[[    0,   -1/2,   0],
+                    [    0,   0,   0],
+                    [     0,   1/2,   0]]]]
+
+        self.filter_y2 = [[[[    0,   0,   0],
+                    [    -1/2,   0,   1/2],
+                    [     0,   0,   0]]]]
+
+        if kernel_size ==5:
+            self.dx = Conv2dDerivative(
+                DerFilter = self.filter_x4,
+                resol = self.delta_x,
+                kernel_size = 5,
+                name = 'dx_operator').to(args.device)
+
+            self.dy = Conv2dDerivative(
+                DerFilter = self.filter_y4,
+                resol = self.delta_x,
+                kernel_size = 5,
+                name = 'dy_operator').to(args.device)  
+
+        elif kernel_size ==3:
+            self.dx = Conv2dDerivative(
+                DerFilter = self.filter_x2,
+                resol = self.delta_x,
+                kernel_size = 3,
+                name = 'dx_operator').to(args.device)
+
+            self.dy = Conv2dDerivative(
+                DerFilter = self.filter_y2,
+                resol = self.delta_x,
+                kernel_size = 3,
+                name = 'dy_operator').to(args.device)  
+
+    def get_div_loss(self, output):
+        '''compute divergence loss'''
+        u = output[:,0:1,:,:]
+        #bu,xu,yu = u.shape
+        #u = u.reshape(bu,1,xu,yu)
+
+        v = output[:,1:2,:,:]
+        #bv,xv,yv = v.shape
+        #v = v.reshape(bv,1,xv,yv)
+
+        #w = output[:,0,:,:]
+        u_x = self.dx(u)  
+        v_y = self.dy(v)  
+        # div
+        div = u_x + v_y
+
+        return div
 
 # train the model with the given parameters and save the model with the best validation error
 def train(args, train_loader, val1_loader, val2_loader, model, optimizer, criterion):
-    if args.phy_loss_weight > 0:
-        loss_generator = LossGenerator(args, dx=2.0*np.pi/2048.0, kernel_size=3)
-    l2loss = nn.MSELoss()
     best_val = np.inf
+    loss_generator = LossGenerator(args, dx=2.0*np.pi/2048.0, kernel_size=3)
     train_loss_list, val_error_list = [], []
     start2 = time.time()
+    l2loss =nn.MSELoss()
     for epoch in range(args.epochs):
         start = time.time()
         train_loss_total = 0
 
         for batch_idx, (data, target) in enumerate(train_loader):
             # [b,c,h,w]
-            data, target = data.float().to(args.device), target.float().to(args.device)
+            data, target = data.to(args.device).float(), target.to(args.device).float()
 
             # forward
             model.train()
             output = model(data) 
             loss = criterion(output, target)
-            if args.phy_loss_weight > 0 and args.data_name.startswith('nskt'):
-                div = loss_generator.get_div_loss(output)
-                phy_loss = l2loss(div, torch.zeros_like(div))
-                loss += phy_loss*args.phy_loss_weight
-
+            div = loss_generator.get_div_loss(output)
+            phy_loss = l2loss(div, torch.zeros_like(div))
+            loss = loss + phy_loss*args.phy_loss_weight
             train_loss_total += loss.item()
             
             # backward
@@ -51,15 +144,17 @@ def train(args, train_loader, val1_loader, val2_loader, model, optimizer, criter
         # record train loss
         train_loss_mean = train_loss_total / len(train_loader)
         train_loss_list.append(train_loss_mean)
-
+        run["train/loss"].log(train_loss_mean)
+        run["train/phy_loss"].log(phy_loss.item())
         # validate
         mse1, mse2 = validate(args, val1_loader, val2_loader, model, criterion)
+        run["val/error"].log((mse1+mse2)/2)
         print("epoch: %s, val1 error (interp): %.10f, val2 error (extrap): %.10f" % (epoch, mse1, mse2))      
         val_error_list.append(mse1+mse2)
 
         if (mse1+mse2) <= best_val:
             best_val = mse1+mse2
-            save_checkpoint(model, optimizer,'results/model_' + str(args.model) + '_' + str(args.data_name) + '_' + str(args.upscale_factor) + '_' + str(args.lr) + '_' + str(args.method) +'_' + str(args.noise_ratio) + '_' + str(args.seed) + '.pt')
+            save_checkpoint(model, optimizer,'results/model_' + str(args.model) + '_' + str(args.data_name) + '_' + str(args.upscale_factor) + '_' + str(args.lr) + '_' + str(args.method) +'_' + str(args.noise_ratio) + '_' + str(args.seed) +'_' + str(args.phy_loss_weight) +'_'+str(id) + '.pt')
         end = time.time()
         print('The epoch time is: ', (end - start))
     end2 = time.time()
@@ -71,32 +166,21 @@ def train(args, train_loader, val1_loader, val2_loader, model, optimizer, criter
 def validate(args, val1_loader, val2_loader, model, criterion):
     mse1 = 0
     mse2 = 0
-    rfne_mean =0
-    rfne_mean2 =0
     c = 0
-    d = 0
     with torch.no_grad():
         for batch_idx, (data, target) in enumerate(val1_loader):
-            data, target = data.float().to(args.device), target.float().to(args.device)
+            data, target = data.to(args.device).float(), target.to(args.device).float()
             output = model(data) 
             mse1 += criterion(output, target) * data.shape[0]
-            rfne = torch.norm(output - target, p=2, dim=(-1,-2,-3)) / torch.norm(target, p=2, dim=(-1,-2,-3))
-            rfne_mean += rfne.mean()
             c += data.shape[0]
-            d +=1
-
     mse1 /= c
     c = 0
-    d = 0
     with torch.no_grad():
         for batch_idx, (data, target) in enumerate(val2_loader):
-            data, target = data.float().to(args.device), target.float().to(args.device)
+            data, target = data.to(args.device).float(), target.to(args.device).float()
             output = model(data) 
             mse2 += criterion(output, target) * data.shape[0]
-            rfne = torch.norm(output - target, p=2, dim=(-1,-2,-3)) / torch.norm(target, p=2, dim=(-1,-2,-3))
-            rfne_mean2 += rfne.mean()
             c += data.shape[0]
-            d +=1
     mse2 /= c
 
     return mse1.item(), mse2.item()
@@ -124,31 +208,33 @@ def main():
     parser.add_argument('--step_size', type=int, default=1000, help='step size for scheduler')
     parser.add_argument('--gamma', type=float, default=0.97, help='coefficient for scheduler')
     parser.add_argument('--noise_ratio', type=float, default=0.0, help='noise ratio')
-    parser.add_argument('--phy_loss_weight', type=float, default=0.0, help='physics loss weight')
+    parser.add_argument('--phy_loss_weight', type=float, default=0.002, help='physics loss weight')
     # arguments for model
     parser.add_argument('--upscale_factor', type=int, default=4, help='upscale factor')
     parser.add_argument('--in_channels', type=int, default=2, help='num of input channels')
-    parser.add_argument('--hidden_channels', type=int, default=64, help='num of hidden channels')
+    parser.add_argument('--hidden_channels', type=int, default=32, help='num of hidden channels')
     parser.add_argument('--out_channels', type=int, default=2, help='num of output channels')
     parser.add_argument('--n_res_blocks', type=int, default=18, help='num of resdiual blocks')
-    parser.add_argument('--modes', type=int, default=12, help='num of modes')
     parser.add_argument('--loss_type', type=str, default='l1', help='L1 or L2 loss')
     parser.add_argument('--optimizer_type', type=str, default='Adam', help='type of optimizer')
     parser.add_argument('--scheduler_type', type=str, default='ExponentialLR', help='type of scheduler')
+
     args = parser.parse_args()
     print(args)
-
+    run["config"] = vars(args)
     # % --- %
     # Set random seed to reproduce the work
     # % --- %
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
-
-    os.makedirs('./figures', exist_ok=True)
-    os.makedirs('./results', exist_ok=True)
-    # torch.save({"config":vars(args),
-    #             "saved_path": str('results/model_' + str(args.model) + '_' + str(args.data_name) + '_' + str(args.upscale_factor) + '_' + str(args.lr) + '_' + str(args.method) +'_' + str(args.noise_ratio) + '_' + str(args.seed) +'_' +str(id) + '.pt')},f"results/config_{str(id)}.pt")
-
+    torch.save({"config":vars(args),
+                "saved_path": str('results/model_' + str(args.model) + '_' + str(args.data_name) + '_' + str(args.upscale_factor) + '_' + str(args.lr) + '_' + str(args.method) +'_' + str(args.noise_ratio) + '_' + str(args.seed) +'_' +str(id) + '.pt')},f"results/config_{str(id)}.pt")
+    # % --- %
+    # Set random seed to reproduce the work
+    # % --- %
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed(args.seed)
+    
     # % --- %
     # Load data
     # % --- %
@@ -163,12 +249,10 @@ def main():
     # % --- %
     # some hyper-parameters for SwinIR
     upscale = args.upscale_factor
-    hidden = args.hidden_channels
-    modes = args.modes
     window_size = 8
     height = (args.crop_size // upscale // window_size + 1) * window_size
     width = (args.crop_size // upscale // window_size + 1) * window_size
-    print(height, width)
+
     model_list = {
             'subpixelCNN': subpixelCNN(args.in_channels, upscale_factor=args.upscale_factor, width=1, mean = mean,std = std),
             'SRCNN': SRCNN(args.in_channels, args.upscale_factor,mean,std),
@@ -177,8 +261,7 @@ def main():
             'SwinIR': SwinIR(upscale=args.upscale_factor, in_chans=args.in_channels, img_size=(height, width),
                     window_size=window_size, img_range=1., depths=[6, 6, 6, 6, 6, 6],
                     embed_dim=180, num_heads=[6, 6, 6, 6, 6, 6], mlp_ratio=2, upsampler='pixelshuffle', resi_connection='1conv',mean =mean,std=std),
-           "FNO2D":FNO2D(layers=[hidden, hidden, hidden, hidden, hidden],modes1=[modes, modes, modes, modes],modes2=[modes, modes, modes, modes],fc_dim=128,in_dim=args.in_channels,out_dim=args.in_channels,mean= mean,std=std,scale_factor=upscale),
-    }  
+    }
 
     model = model_list[args.model].to(args.device)
     model = torch.nn.DataParallel(model)
@@ -199,8 +282,7 @@ def main():
     # % --- %
     optimizer = set_optimizer(args, model)
     if args.pretrained == True:
-        checkpoint = torch.load(args.model_path)
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        optimizer = load_checkpoint(optimizer, args.model_path)
         optimizer = optimizer.to(args.device)
     scheduler = set_scheduler(args, optimizer, train_loader)
     criterion = loss_function(args)
@@ -213,8 +295,6 @@ def main():
     # % --- %
     # Post-process: plot train loss and val error
     # % --- %
-
-
     x_axis = np.arange(0, args.epochs)
     plt.figure()
     plt.plot(x_axis, train_loss_list, label = 'train loss')

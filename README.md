@@ -173,8 +173,6 @@ pip install -r requirements.txt
     > **Note:** Make sure to update the `PATH` variable in `generate_train_sh.py` to match the path where you have downloaded the data.
 
 
-
-
     ```shell
     python generate_train_sh.py
     ```
@@ -187,14 +185,12 @@ pip install -r requirements.txt
 
 3. Evaluating Trained Models
 
-
     To evaluate the performance of your trained model, you can use the `eval.py` script provided. This script requires several arguments to be specified:
 
     - `--data_name`: The name of the dataset you are using for evaluation.
     - `--data_path`: The path to the dataset directory.
     - `--model_path`: The path to the trained model file.
     - `--in_channels`: The number of input channels for the model.
-
 
 4. Visualize the Super-Resolution (SR) Results
 
