@@ -183,7 +183,7 @@ pip install -r requirements.txt
     sh train_all.sh
     ```
 
-3. Evaluating Trained Models
+3. Evaluating Trained Models (Download trained weights from [here](https://drive.google.com/drive/folders/1YA96fXQBMxEmw2Xfv9jMkQQTSIPWoJuK?usp=sharing).) 
 
     To evaluate the performance of your trained model, you can use the `eval.py` script provided. This script requires several arguments to be specified:
 
