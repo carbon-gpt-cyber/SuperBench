@@ -1,0 +1,28 @@
+seed: 1101
+model:
+    learning_rate: 0.000045
+
+data_module:
+    root_dir: /root/paddlejob/workspace/zhangyichen04/downscale_mpi_era5
+    variables: [
+    # "geopotential_500",
+    # "temperature_850",
+    "2m_temperature",
+    # "10m_u_component_of_wind",
+    # "10m_v_component_of_wind",
+    ]
+    out_variables: [
+    # "geopotential_500",
+    # "temperature_850",
+    "2m_temperature",
+    # "10m_u_component_of_wind",
+    # "10m_v_component_of_wind"
+    ]
+    buffer_size: 2000
+    batch_size: 24
+    num_workers: 1
+    pin_memory: False
+
+trainer:
+    max_epochs: 50
+    gpus: -1

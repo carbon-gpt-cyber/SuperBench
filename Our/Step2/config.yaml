@@ -1,0 +1,36 @@
+seed: 11
+model:
+    net_type: b
+    l_encoder_checkpoint_path: vq_vae_low.ckpt
+    h_encoder_checkpoint_path: vq_vae_high.ckpt
+    learning_rate: 0.000045
+    warmup_epochs: 5
+    max_epochs: 100
+
+data_module:
+    root_dir: /root/paddlejob/workspace/zhangyichen04/downscale_mpi_era5
+    variables: [
+    # "geopotential_500",
+    # "temperature_850",
+    "2m_temperature",
+    # "10m_u_component_of_wind",
+    # "10m_v_component_of_wind",
+    ]
+    out_variables: [
+    # "geopotential_500",
+    # "temperature_850",
+    "2m_temperature",
+    # "10m_u_component_of_wind",
+    # "10m_v_component_of_wind"
+    ]
+    buffer_size: 2000
+    batch_size: 4
+    num_workers: 1
+    pin_memory: False
+
+scheduler:
+    warmup_epochs: 10
+
+trainer:
+    max_epochs: 50
+    gpus: -1
