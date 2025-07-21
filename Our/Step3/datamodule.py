@@ -1,173 +1,124 @@
 import os
-from typing import Optional
-
+from typing import Optional, List
 import numpy as np
 import torch
-from pytorch_lightning import LightningDataModule
-from torch.utils.data import DataLoader, IterableDataset
+from torch.utils.data import DataLoader, Dataset
 from torchvision.transforms import transforms
+from pytorch_lightning import LightningDataModule
 
-from data import NpyReader, Downscaling, IndividualForecastDataIter, ShuffleIterableDataset
+from src.data_loader import GetClimateDataset
+from utils import get_data_info
+
+class SequenceWrapper(Dataset):
+    """Wrap single-frame dataset to provide a time dimension."""
+    def __init__(self, dataset: Dataset, variables: List[str]):
+        self.dataset = dataset
+        self.variables = variables
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        x, y = self.dataset[idx]
+        # add time dimension
+        x = x.unsqueeze(0)
+        y = y.unsqueeze(0)
+        return x, y, self.variables, self.variables
+
 
 def collate_fn(batch):
-    inp = torch.stack([batch[i][0] for i in range(len(batch))])
-    out = torch.stack([batch[i][1] for i in range(len(batch))])
+    inp = torch.stack([b[0] for b in batch])
+    out = torch.stack([b[1] for b in batch])
     variables = batch[0][2]
     out_variables = batch[0][3]
-    return (
-        inp,
-        out,
-        [v for v in variables],
-        [v for v in out_variables],
-    )
+    return inp, out, variables, out_variables
+
 
 class ClimateDownscalingDataModule(LightningDataModule):
-    """DataModule for climate downscaling data.
-
-    Args:
-        root_dir (str): Root directory for sharded data.
-        variables (list): List of input variables.
-        buffer_size (int): Buffer size for shuffling.
-        out_variables (list, optional): List of output variables.
-        batch_size (int, optional): Batch size.
-        num_workers (int, optional): Number of workers.
-        pin_memory (bool, optional): Whether to pin memory.
-    """
-    def __init__(
-        self,
-        root_dir,
-        variables,
-        buffer_size,
-        win_size: int = 6,
-        out_variables=None,
-        batch_size: int = 64,
-        num_workers: int = 0,
-        pin_memory: bool = False,
-    ):
+    def __init__(self,
+                 root_dir: str,
+                 variables: List[str],
+                 batch_size: int = 4,
+                 num_workers: int = 0,
+                 upscale_factor: int = 4,
+                 crop_size: int = 720,
+                 method: str = "bicubic",
+                 noise_ratio: float = 0.0):
         super().__init__()
+        self.save_hyperparameters()
 
-        # this line allows to access init params with 'self.hparams' attribute
-        self.save_hyperparameters(logger=False)
-        self.win_size = win_size
-        if isinstance(out_variables, str):
-            out_variables = [out_variables]
-            self.hparams.out_variables = out_variables
-            
-        #######################################
-        self.lister_train = os.listdir(os.path.join(root_dir, "train"))
-        self.lister_train = [os.path.join(root_dir, "train", f) for f in self.lister_train]
-        self.lister_val = os.listdir(os.path.join(root_dir, "val"))
-        self.lister_val = [os.path.join(root_dir, "val", f) for f in self.lister_val]
-        self.lister_test = os.listdir(os.path.join(root_dir, "test"))
-        self.lister_test = [os.path.join(root_dir, "test", f) for f in self.lister_test]
-        #######################################
+        _, _, _, mean, std = get_data_info('era5')
+        self.transforms = transforms.Normalize(mean, std)
+        self.output_transforms = transforms.Normalize(mean, std)
+        self.std = std
 
-        self.transforms = self.get_normalize(type='input')         
-        self.output_transforms = self.get_normalize(type='output', variables=out_variables)     # do normalize on data
+        self.data_train: Optional[Dataset] = None
+        self.data_val1: Optional[Dataset] = None
+        self.data_val2: Optional[Dataset] = None
+        self.data_test1: Optional[Dataset] = None
+        self.data_test2: Optional[Dataset] = None
 
-        self.data_train: Optional[IterableDataset] = None
-        self.data_val: Optional[IterableDataset] = None
-        self.data_test: Optional[IterableDataset] = None
-
-    def get_normalize(self, type, variables=None):
-        assert type in ['input', 'output']
-        if variables is None:
-            variables = self.hparams.variables
-        normalize_mean = dict(np.load(os.path.join(self.hparams.root_dir, f"normalize_mean_{type}.npz")))
-        mean = []
-        for var in variables:
-            if var != "total_precipitation":
-                mean.append(normalize_mean[var])
-            else:
-                mean.append(np.array([0.0]))
-        normalize_mean = np.concatenate(mean)
-        normalize_std = dict(np.load(os.path.join(self.hparams.root_dir, f"normalize_std_{type}.npz")))
-        normalize_std = np.concatenate([normalize_std[var] for var in variables])
-        return transforms.Normalize(normalize_mean, normalize_std)
-
-    def get_lat_lon(self):
-        lat = np.load(os.path.join(self.hparams.root_dir, "lat.npy"))
-        lon = np.load(os.path.join(self.hparams.root_dir, "lon.npy"))
-        return lat, lon
+    def prepare_data(self):
+        pass
 
     def setup(self, stage: Optional[str] = None):
-        # load datasets only if they're not loaded already
-        if not self.data_train and not self.data_val and not self.data_test:
-            self.data_train = ShuffleIterableDataset(
-                IndividualForecastDataIter(
-                    Downscaling(
-                        NpyReader(
-                            file_list=self.lister_train,
-                            variables=self.hparams.variables,
-                            out_variables=self.hparams.out_variables,
-                            shuffle=True,
-                        ),
-                    ),
-                    transforms=self.transforms,
-                    output_transforms=self.output_transforms,
-                    win_size=self.win_size,
-                ),
-                buffer_size=self.hparams.buffer_size,
-            )
+        if self.data_train is None:
+            def build(subdir, train):
+                ds = GetClimateDataset(os.path.join(self.hparams.root_dir, subdir),
+                                        train=train,
+                                        transform=torch.from_numpy,
+                                        upscale_factor=self.hparams.upscale_factor,
+                                        noise_ratio=self.hparams.noise_ratio,
+                                        std=self.std,
+                                        crop_size=self.hparams.crop_size,
+                                        n_patches=1,
+                                        method=self.hparams.method)
+                return SequenceWrapper(ds, self.hparams.variables)
 
-            if self.lister_val is not None:
-                self.data_val = IndividualForecastDataIter(
-                    Downscaling(
-                        NpyReader(
-                            file_list=self.lister_val,
-                            variables=self.hparams.variables,
-                            out_variables=self.hparams.out_variables,
-                        ),
-                    ),
-                    transforms=self.transforms,
-                    output_transforms=self.output_transforms,
-                    win_size=self.win_size,
-                )
-
-            if self.lister_test is not None:
-                self.data_test = IndividualForecastDataIter(
-                    Downscaling(
-                        NpyReader(
-                            file_list=self.lister_test,
-                            variables=self.hparams.variables,
-                            out_variables=self.hparams.out_variables,
-                        ),
-                    ),
-                    transforms=self.transforms,
-                    output_transforms=self.output_transforms,
-                    win_size=self.win_size,
-                )
+            self.data_train = build('train', True)
+            self.data_val1 = build('valid_1', False)
+            self.data_val2 = build('valid_2', False)
+            self.data_test1 = build('test_1', False)
+            self.data_test2 = build('test_2', False)
 
     def train_dataloader(self):
-        return DataLoader(
-            self.data_train,
-            batch_size=self.hparams.batch_size,
-            drop_last=False,
-            num_workers=self.hparams.num_workers,
-            pin_memory=self.hparams.pin_memory,
-            collate_fn=collate_fn,
-        )
+        return DataLoader(self.data_train,
+                          batch_size=self.hparams.batch_size,
+                          shuffle=True,
+                          num_workers=self.hparams.num_workers,
+                          collate_fn=collate_fn)
 
     def val_dataloader(self):
-        if self.lister_val is not None:
-            return DataLoader(
-                self.data_val,
-                batch_size=self.hparams.batch_size,
-                shuffle=False,
-                drop_last=False,
-                num_workers=self.hparams.num_workers,
-                pin_memory=self.hparams.pin_memory,
-                collate_fn=collate_fn,
-            )
+        loader1 = DataLoader(self.data_val1,
+                             batch_size=self.hparams.batch_size,
+                             shuffle=False,
+                             num_workers=self.hparams.num_workers,
+                             collate_fn=collate_fn)
+        loader2 = DataLoader(self.data_val2,
+                             batch_size=self.hparams.batch_size,
+                             shuffle=False,
+                             num_workers=self.hparams.num_workers,
+                             collate_fn=collate_fn)
+        return [loader1, loader2]
 
     def test_dataloader(self):
-        if self.lister_test is not None:
-            return DataLoader(
-                self.data_test,
-                batch_size=self.hparams.batch_size,
-                shuffle=False,
-                drop_last=False,
-                num_workers=self.hparams.num_workers,
-                pin_memory=self.hparams.pin_memory,
-                collate_fn=collate_fn,
-            )
+        loader1 = DataLoader(self.data_test1,
+                             batch_size=self.hparams.batch_size,
+                             shuffle=False,
+                             num_workers=self.hparams.num_workers,
+                             collate_fn=collate_fn)
+        loader2 = DataLoader(self.data_test2,
+                             batch_size=self.hparams.batch_size,
+                             shuffle=False,
+                             num_workers=self.hparams.num_workers,
+                             collate_fn=collate_fn)
+        return [loader1, loader2]
+
+    def get_lat_lon(self):
+        lat_path = os.path.join(self.hparams.root_dir, 'lat.npy')
+        lon_path = os.path.join(self.hparams.root_dir, 'lon.npy')
+        if os.path.exists(lat_path) and os.path.exists(lon_path):
+            lat = np.load(lat_path)
+            lon = np.load(lon_path)
+            return lat, lon
+        return None, None
