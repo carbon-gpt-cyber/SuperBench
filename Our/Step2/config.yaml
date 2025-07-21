@@ -11,8 +11,6 @@ data_module:
     root_dir: /root/paddlejob/workspace/env_run/SuperBench/climate
     variables:
         - "2m_temperature"
-    out_variables:
-        - "2m_temperature"
     batch_size: 4
     num_workers: 1
     upscale_factor: 4

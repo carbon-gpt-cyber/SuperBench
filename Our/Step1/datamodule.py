@@ -19,6 +19,21 @@ def collate_fn(batch):
     return inp, out, variables, out_variables
 
 
+class VariableWrapper(Dataset):
+    """Wrap dataset to attach variable metadata."""
+
+    def __init__(self, dataset: Dataset, variables: List[str]):
+        self.dataset = dataset
+        self.variables = variables
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        x, y = self.dataset[idx]
+        return x, y, self.variables, self.variables
+
+
 class ClimateDownscalingDataModule(LightningDataModule):
     """DataModule loading SuperBench climate dataset for VQVAE training."""
 
@@ -51,16 +66,18 @@ class ClimateDownscalingDataModule(LightningDataModule):
     def setup(self, stage: Optional[str] = None):
         if self.data_train is None:
             def build(subdir, train):
-                ds = GetClimateDataset(os.path.join(self.hparams.root_dir, subdir),
-                                        train=train,
-                                        transform=torch.from_numpy,
-                                        upscale_factor=self.hparams.upscale_factor,
-                                        noise_ratio=self.hparams.noise_ratio,
-                                        std=self.std,
-                                        crop_size=self.hparams.crop_size,
-                                        n_patches=1,
-                                        method=self.hparams.method)
-                return ds
+                ds = GetClimateDataset(
+                    os.path.join(self.hparams.root_dir, subdir),
+                    train=train,
+                    transform=torch.from_numpy,
+                    upscale_factor=self.hparams.upscale_factor,
+                    noise_ratio=self.hparams.noise_ratio,
+                    std=self.std,
+                    crop_size=self.hparams.crop_size,
+                    n_patches=1,
+                    method=self.hparams.method,
+                )
+                return VariableWrapper(ds, self.hparams.variables)
 
             self.data_train = build('train', True)
             self.data_val1 = build('valid_1', False)
