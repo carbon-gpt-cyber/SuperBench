@@ -31,8 +31,7 @@ def main(config_path):
     set_seed(config['seed'])
 
     data_module = ClimateDownscalingDataModule(**config['data_module'])
-    # model = VQVAE_H(**config['model'])
-    model = VQVAE_L(**config['model'])
+    model = VQVAE_H(input_channels=3, output_channels=3, **config['model'])
 
     checkpoint_callback = ModelCheckpoint(monitor='val_loss', save_top_k=3, mode='min')
 

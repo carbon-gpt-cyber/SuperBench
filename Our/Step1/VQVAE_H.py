@@ -195,7 +195,7 @@ class VQVAE_H(LightningModule):
         self.log("train_loss", loss, on_step=True, on_epoch=False, prog_bar=True)
         return loss
     
-    def validation_step(self, batch, batch_idx):
+    def validation_step(self, batch, batch_idx, dataloader_idx=None):
         x, y, variables, out_variables = batch
         y_recon, z, z_q, commitment_loss = self.forward(y)
         recon_loss = self.reconstruction_loss(y_recon, y)

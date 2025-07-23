@@ -4,7 +4,7 @@ from torch import einsum
 import torch.nn.functional as F
 from einops.layers.torch import Rearrange
 from pytorch_lightning import LightningModule
-from VQVAE_H import VQVAE_H
+from Our.Step1.VQVAE_H import VQVAE_H
 
 class ResConv(nn.Module):
     def __init__(self, in_channels, out_channels):
